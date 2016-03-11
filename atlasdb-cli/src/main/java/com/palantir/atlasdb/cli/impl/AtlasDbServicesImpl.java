@@ -26,13 +26,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.common.base.Optional;
 import com.google.common.base.Strings;
+import com.google.common.base.Supplier;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.palantir.atlasdb.cleaner.CleanupFollower;
+import com.palantir.atlasdb.cleaner.Follower;
 import com.palantir.atlasdb.cli.api.AtlasDbServices;
 import com.palantir.atlasdb.factory.TransactionManagers;
 import com.palantir.atlasdb.keyvalue.api.KeyValueService;
 import com.palantir.atlasdb.server.AtlasDbServerConfiguration;
+import com.palantir.atlasdb.sweep.SweepTaskRunner;
+import com.palantir.atlasdb.sweep.SweepTaskRunnerImpl;
 import com.palantir.atlasdb.table.description.Schema;
 import com.palantir.atlasdb.transaction.impl.SerializableTransactionManager;
+import com.palantir.atlasdb.transaction.impl.SweepStrategyManager;
+import com.palantir.atlasdb.transaction.impl.SweepStrategyManagers;
+import com.palantir.atlasdb.transaction.service.TransactionService;
+import com.palantir.atlasdb.transaction.service.TransactionServices;
 import com.palantir.lock.RemoteLockService;
 import com.palantir.timestamp.TimestampService;
 
@@ -41,12 +51,13 @@ import io.dropwizard.jackson.Jackson;
 public class AtlasDbServicesImpl implements AtlasDbServices {
 
     private SerializableTransactionManager tm;
+    private SweepTaskRunner sweeper;
 
     public static AtlasDbServices connect(File configFile, String configRoot) throws IOException {
         ObjectMapper configMapper = Jackson.newObjectMapper(new YAMLFactory());
         JsonNode node = getConfigNode(configMapper, configFile, configRoot);
         AtlasDbServerConfiguration config = configMapper.treeToValue(node, AtlasDbServerConfiguration.class);
-        SerializableTransactionManager tm = TransactionManagers.create(
+        final SerializableTransactionManager tm = TransactionManagers.create(
                 config.getConfig(),
                 Optional.<SSLSocketFactory>absent(),
                 ImmutableSet.<Schema>of(),
@@ -56,7 +67,31 @@ public class AtlasDbServicesImpl implements AtlasDbServices {
                     }
                 },
                 true);
-        return new AtlasDbServicesImpl(tm);
+
+        KeyValueService kvs = tm.getKeyValueService();
+        TransactionService transactionService = TransactionServices.createTransactionService(kvs);
+        SweepStrategyManager sweepStrategyManager = SweepStrategyManagers.createDefault(kvs);
+        CleanupFollower follower = CleanupFollower.create(ImmutableSet.<Schema>of());;
+        SweepTaskRunner sweepRunner = new SweepTaskRunnerImpl(
+                tm,
+                kvs,
+                new Supplier<Long>() {
+                    @Override
+                    public Long get() {
+                        return tm.getUnreadableTimestamp();
+                    }
+                },
+                new Supplier<Long>() {
+                    @Override
+                    public Long get() {
+                        return tm.getImmutableTimestamp();
+                    }
+                },
+                transactionService,
+                sweepStrategyManager,
+                ImmutableList.<Follower>of(follower));
+
+        return new AtlasDbServicesImpl(tm, sweepRunner);
     }
 
     private static JsonNode getConfigNode(ObjectMapper configMapper, File configFile, String configRoot) throws IOException {
@@ -87,8 +122,9 @@ public class AtlasDbServicesImpl implements AtlasDbServices {
         }
     }
 
-    private AtlasDbServicesImpl(SerializableTransactionManager tm) {
+    private AtlasDbServicesImpl(SerializableTransactionManager tm, SweepTaskRunner sweeper) {
         this.tm = tm;
+        this.sweeper = sweeper;
     }
 
     @Override
@@ -110,4 +146,10 @@ public class AtlasDbServicesImpl implements AtlasDbServices {
     public SerializableTransactionManager getTransactionManager() {
         return tm;
     }
+
+    @Override
+    public SweepTaskRunner getSweepTaskRunner() {
+        return sweeper;
+    }
+
 }
