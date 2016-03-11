@@ -32,6 +32,7 @@ import com.google.common.collect.ImmutableSet;
 import com.palantir.atlasdb.cleaner.CleanupFollower;
 import com.palantir.atlasdb.cleaner.Follower;
 import com.palantir.atlasdb.cli.api.AtlasDbServices;
+import com.palantir.atlasdb.config.AtlasDbConfig;
 import com.palantir.atlasdb.factory.TransactionManagers;
 import com.palantir.atlasdb.keyvalue.api.KeyValueService;
 import com.palantir.atlasdb.server.AtlasDbServerConfiguration;
@@ -50,8 +51,9 @@ import io.dropwizard.jackson.Jackson;
 
 public class AtlasDbServicesImpl implements AtlasDbServices {
 
-    private SerializableTransactionManager tm;
-    private SweepTaskRunner sweeper;
+    private final AtlasDbConfig config;
+    private final SerializableTransactionManager tm;
+    private final SweepTaskRunner sweeper;
 
     public static AtlasDbServices connect(File configFile, String configRoot) throws IOException {
         ObjectMapper configMapper = Jackson.newObjectMapper(new YAMLFactory());
@@ -91,7 +93,7 @@ public class AtlasDbServicesImpl implements AtlasDbServices {
                 sweepStrategyManager,
                 ImmutableList.<Follower>of(follower));
 
-        return new AtlasDbServicesImpl(tm, sweepRunner);
+        return new AtlasDbServicesImpl(config.getConfig(), tm, sweepRunner);
     }
 
     private static JsonNode getConfigNode(ObjectMapper configMapper, File configFile, String configRoot) throws IOException {
@@ -122,9 +124,15 @@ public class AtlasDbServicesImpl implements AtlasDbServices {
         }
     }
 
-    private AtlasDbServicesImpl(SerializableTransactionManager tm, SweepTaskRunner sweeper) {
+    private AtlasDbServicesImpl(AtlasDbConfig config, SerializableTransactionManager tm, SweepTaskRunner sweeper) {
+        this.config = config;
         this.tm = tm;
         this.sweeper = sweeper;
+    }
+
+    @Override
+    public AtlasDbConfig getServerConfig() {
+        return config;
     }
 
     @Override

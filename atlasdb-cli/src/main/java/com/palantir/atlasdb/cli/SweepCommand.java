@@ -31,6 +31,7 @@ import com.google.common.io.BaseEncoding;
 import com.palantir.atlasdb.AtlasDbConstants;
 import com.palantir.atlasdb.cli.api.AtlasDbServices;
 import com.palantir.atlasdb.cli.api.SingleBackendCommand;
+import com.palantir.atlasdb.config.AtlasDbConfig;
 import com.palantir.atlasdb.keyvalue.api.SweepResults;
 import com.palantir.atlasdb.schema.generated.SweepPriorityTable;
 import com.palantir.atlasdb.schema.generated.SweepTableFactory;
@@ -61,16 +62,9 @@ public class SweepCommand extends SingleBackendCommand {
             description = "Sweep all tables")
     boolean sweepAllTables;
 
-    @Option(name = {"-b", "--batch"},
-            description = "Sweep batch size (default: 2000)")
-    int sweepBatchSize = 2000;
-
-    @Option(name = {"-p", "--pause"},
-    description = "The number of milliseconds to pause between each batch of deletes (default: 5000)")
-    long sweepPauseMillis = 5000;
-
 	@Override
 	protected int execute(final AtlasDbServices services) {
+        AtlasDbConfig config = services.getServerConfig();
         SweepTaskRunner sweepRunner = services.getSweepTaskRunner();
 
         if (!((namespace != null) ^ (table != null) ^ sweepAllTables)) {
@@ -112,7 +106,7 @@ public class SweepCommand extends SingleBackendCommand {
 
             while (startRow.isPresent()) {
                 Stopwatch watch = Stopwatch.createStarted();
-                SweepResults results = sweepRunner.run(table, sweepBatchSize, startRow.get());
+                SweepResults results = sweepRunner.run(table, config.getSweepBatchSize(), startRow.get());
                 System.out.println(String.format("Swept from %s to %s in table %s in %d ms, examined %d unique cells, deleted %d cells.",
                         encodeStartRow(startRow), encodeEndRow(results.getNextStartRow()),
                         table, watch.elapsed(TimeUnit.MILLISECONDS),
@@ -121,7 +115,7 @@ public class SweepCommand extends SingleBackendCommand {
                 cellsDeleted.addAndGet(results.getCellsDeleted());
                 cellsExamined.addAndGet(results.getCellsExamined());
                 try {
-                    Thread.sleep(sweepPauseMillis);
+                    Thread.sleep(config.getSweepPauseMillis());
                 } catch (InterruptedException e) {
                     throw Throwables.rewrapAndThrowUncheckedException(e);
                 }
