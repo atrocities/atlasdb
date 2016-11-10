@@ -5,12 +5,15 @@ apply from: "../gradle/shared.gradle"
 dependencies {
   testCompile project(":atlasdb-dbkvs")
   testCompile project(":atlasdb-tests-shared")
+  testCompile project(":commons-db")
 
   testCompile group: 'org.mockito', name: 'mockito-core'
   testCompile 'com.palantir.docker.compose:docker-compose-rule:' + libVersions.dockerComposeRule
   testCompile group: 'junit', name: 'junit'
 
-  runtime 'com.palantir.atlasdb:dbkvs-oracle-driver:0.3.0'
+  runtime ('com.palantir.atlasdb:dbkvs-oracle-driver:0.3.0') {
+    exclude module:'commons-db'
+  }
 }
 
 repositories {
